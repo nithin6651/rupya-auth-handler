@@ -1,3 +1,4 @@
+// app/api/callback/route.ts
 import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
@@ -6,32 +7,23 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
 
   const code = searchParams.get("code");
-  const uid = searchParams.get("state"); // Supabase user ID
+  const uid = searchParams.get("state"); // UID passed from login-upstox
 
-  if (!code) {
+  if (!code || !uid) {
     return NextResponse.json(
-      { error: "Missing authorization code" },
+      { error: "Missing code or uid" },
       { status: 400 }
     );
   }
 
-  if (!uid) {
-    return NextResponse.json(
-      { error: "Missing Supabase UID from state" },
-      { status: 400 }
-    );
-  }
+  console.log("🔗 Received Upstox OAuth callback");
+  console.log("➡️ Code:", code);
+  console.log("➡️ UID:", uid);
 
-  console.log("🔗 Received Upstox code:", code);
-  console.log("👤 Supabase UID:", uid);
+  // Always redirect to your deployed token handler
+  const tokenUrl = `${process.env.NEXT_PUBLIC_BASE_URL}/api/upstox-token?code=${code}&uid=${uid}`;
 
-  const isProduction = process.env.NODE_ENV === "production";
+  console.log("🔁 Redirecting to:", tokenUrl);
 
-  const redirectUrl = isProduction
-    ? `https://rupya-oauth.vercel.app/api/upstox-token?code=${code}&uid=${uid}`
-    : `http://localhost:3000/api/upstox-token?code=${code}&uid=${uid}`;
-
-  console.log("🔁 Redirecting to token handler:", redirectUrl);
-
-  return NextResponse.redirect(redirectUrl);
+  return NextResponse.redirect(tokenUrl);
 }
