@@ -4,82 +4,128 @@ import { createClient } from "@supabase/supabase-js";
 
 export const dynamic = "force-dynamic";
 
+// Create Supabase client (service role)
 function getSupabase() {
-  return createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
+  return createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  );
 }
 
 export async function GET(request: Request) {
-  // Basic authorization check for cron/manual trigger
-  const auth = request.headers.get("authorization") ?? "";
-  if (!process.env.CRON_SECRET || auth !== `Bearer ${process.env.CRON_SECRET}`) {
+  // Secure refresh endpoint: requires CRON_SECRET in Authorization header
+  const auth = request.headers.get("authorization")?.trim() ?? "";
+  const expected = `Bearer ${process.env.CRON_SECRET}`;
+
+  if (!process.env.CRON_SECRET || auth !== expected) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   const supabase = getSupabase();
 
-  // fetch tokens that have a refresh_token
-  const { data: tokens, error: fetchError } = await supabase
+  // Fetch all tokens that actually have a refresh_token
+  const { data: tokens, error: fetchErr } = await supabase
     .from("upstox_tokens")
     .select("*")
     .not("refresh_token", "is", null);
 
-  if (fetchError) {
-    console.error("Supabase fetch error:", fetchError);
-    return NextResponse.json({ error: "Supabase fetch error", details: fetchError }, { status: 500 });
+  if (fetchErr) {
+    console.error("❌ Failed to fetch tokens:", fetchErr);
+    return NextResponse.json(
+      { error: "Supabase fetch error", details: fetchErr },
+      { status: 500 }
+    );
   }
 
   if (!tokens || tokens.length === 0) {
-    return NextResponse.json({ message: "No tokens to refresh" });
+    return NextResponse.json({ message: "No tokens with refresh_token available" });
   }
 
   let refreshed = 0;
+  const results: any[] = [];
 
-  for (const t of tokens) {
-    // refresh if expires within 15 minutes (or already expired)
-    const expiresAt = new Date(t.expires_at).getTime();
-    if (expiresAt - Date.now() > 15 * 60 * 1000) continue;
-
+  for (const row of tokens) {
     try {
-      const resp = await fetch("https://api.upstox.com/v2/login/authorization/token", {
-        method: "POST",
-        headers: { accept: "application/json", "Content-Type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({
-          client_id: process.env.UPSTOX_CLIENT_ID!,
-          client_secret: process.env.UPSTOX_CLIENT_SECRET!,
-          refresh_token: t.refresh_token,
-          grant_type: "refresh_token",
-        }),
-      });
+      const expiresAtMs = new Date(row.expires_at).getTime();
+      const timeLeft = expiresAtMs - Date.now();
 
-      const newData = await resp.json();
-      if (!resp.ok) {
-        console.error("Refresh failed for", t.upstox_user_id, newData);
+      // Skip if token is still valid for more than 15 minutes
+      if (timeLeft > 15 * 60 * 1000) {
+        results.push({ user_id: row.user_id, skipped: true });
         continue;
       }
 
-      const newExpiry = new Date(Date.now() + 59 * 60 * 1000).toISOString();
+      console.log("🔄 Refreshing token for:", row.user_id);
 
-      const { error: updateError } = await supabase
+      // REFRESH REQUEST — correct Upstox flow
+      const body = new URLSearchParams({
+        grant_type: "refresh_token",
+        refresh_token: row.refresh_token,
+        client_id: process.env.UPSTOX_CLIENT_ID!,
+        client_secret: process.env.UPSTOX_CLIENT_SECRET!,
+      });
+
+      const resp = await fetch(
+        "https://api.upstox.com/v2/login/authorization/token",
+        {
+          method: "POST",
+          headers: {
+            accept: "application/json",
+            "Content-Type": "application/x-www-form-urlencoded",
+          },
+          body,
+        }
+      );
+
+      const newData = await resp.json();
+
+      if (!resp.ok) {
+        console.error("❌ Refresh failed:", newData);
+        results.push({
+          user_id: row.user_id,
+          refreshed: false,
+          error: newData,
+        });
+        continue;
+      }
+
+      // Calculate next expiry (~59 minutes)
+      const newExpires = new Date(Date.now() + 59 * 60 * 1000).toISOString();
+
+      // Update the token row — using user_id unique constraint
+      const { error: updateErr } = await supabase
         .from("upstox_tokens")
         .update({
           access_token: newData.access_token,
-          refresh_token: newData.extended_token ?? t.refresh_token,
-          expires_at: newExpiry,
+          refresh_token: newData.extended_token ?? row.refresh_token,
+          expires_at: newExpires,
           updated_at: new Date().toISOString(),
         })
-        .eq("upstox_user_id", t.upstox_user_id);
+        .eq("user_id", row.user_id);
 
-      if (updateError) {
-        console.error("Update failed for", t.upstox_user_id, updateError);
+      if (updateErr) {
+        console.error("❌ Failed to update token:", updateErr);
+        results.push({
+          user_id: row.user_id,
+          refreshed: false,
+          error: updateErr,
+        });
         continue;
       }
 
       refreshed++;
-      console.log("Refreshed token for", t.upstox_user_id);
+      results.push({ user_id: row.user_id, refreshed: true });
+
+      console.log("✨ Token refreshed for:", row.user_id);
+
     } catch (err) {
-      console.error("Exception refreshing token for", t.upstox_user_id, err);
+      console.error("🔥 Exception while refreshing token:", err);
+      results.push({ user_id: row.user_id, refreshed: false, error: err });
     }
   }
 
-  return NextResponse.json({ message: `Refreshed ${refreshed} tokens` });
+  return NextResponse.json({
+    message: `Refreshed ${refreshed} tokens`,
+    results,
+  });
 }
