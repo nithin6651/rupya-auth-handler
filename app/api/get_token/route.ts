@@ -1,18 +1,6 @@
+// app/api/get_token/route.ts
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-
-
-export const dynamic = 'force-dynamic' // <-- add this line at top for Next.js 13+/App Router
-
-function getSupabaseClient() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY
-  if (!url || !key) {
-    throw new Error('Missing Supabase credentials in environment variables')
-  }
-  return createClient(url, key)
-}
-
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -21,6 +9,12 @@ export async function GET(request: Request) {
   if (!upstoxUserId) {
     return NextResponse.json({ error: "Missing upstox_user_id" }, { status: 400 });
   }
+
+  // 🧠 Lazy initialize Supabase client inside the handler
+  const supabase = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  );
 
   // Fetch token from Supabase
   const { data, error } = await supabase
