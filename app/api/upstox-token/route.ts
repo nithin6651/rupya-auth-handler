@@ -71,8 +71,9 @@ export async function GET(request: Request) {
 
   // Upsert with array form and onConflict on the column you chose (example: user_id)
   const { error } = await supabase
-    .from("upstox_tokens")
-    .upsert([record], { onConflict: "user_id" });
+  .from("upstox_tokens")
+  .upsert([record], { onConflict: "user_id" });
+
 
   if (error) {
     console.error("❌ Supabase upsert error:", error);
