@@ -1,10 +1,18 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+
+export const dynamic = 'force-dynamic' // <-- add this line at top for Next.js 13+/App Router
+
+function getSupabaseClient() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY
+  if (!url || !key) {
+    throw new Error('Missing Supabase credentials in environment variables')
+  }
+  return createClient(url, key)
+}
+
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);

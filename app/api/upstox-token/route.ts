@@ -1,13 +1,16 @@
 // app/api/upstox-token/route.ts
-
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 
-// Create Supabase client
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-)
+export const dynamic = 'force-dynamic'
+
+// Lazy-load Supabase client
+function getSupabaseClient() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY
+  if (!url || !key) throw new Error('❌ Missing Supabase credentials in environment')
+  return createClient(url, key)
+}
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
@@ -17,9 +20,10 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'Missing authorization code' }, { status: 400 })
   }
 
-  console.log('🔗 Received code:', code)
+  console.log('🔗 Received Upstox code:', code)
+  const supabase = getSupabaseClient()
 
-  // Step 1️⃣ Exchange code for token
+  // 1️⃣ Exchange code for access token
   const tokenResponse = await fetch('https://api.upstox.com/v2/login/authorization/token', {
     method: 'POST',
     headers: {
@@ -44,13 +48,11 @@ export async function GET(request: Request) {
 
   console.log('✅ Token data received:', tokenData)
 
-  // Step 2️⃣ Extract and structure token data
   const upstoxUserId = tokenData.user_id || 'unknown_upstox_user'
   const accessToken = tokenData.access_token
   const refreshToken = tokenData.extended_token || null
-  const expiresAt = new Date(Date.now() + 86400000).toISOString() // ~24 hours
+  const expiresAt = new Date(Date.now() + 86400000).toISOString()
 
-  // Try linking Supabase auth user (optional)
   let userId: string | null = null
   try {
     const { data } = await supabase.auth.getUser()
@@ -59,10 +61,10 @@ export async function GET(request: Request) {
     console.log('⚠️ No Supabase user session found — saving without UUID.')
   }
 
-  // Step 3️⃣ Save token to Supabase
+  // 3️⃣ Save token to Supabase
   const { error } = await supabase.from('upstox_tokens').upsert({
-    user_id: userId, // UUID or null
-    upstox_user_id: upstoxUserId, // e.g. BH7396
+    user_id: userId,
+    upstox_user_id: upstoxUserId,
     access_token: accessToken,
     refresh_token: refreshToken,
     expires_at: expiresAt,
