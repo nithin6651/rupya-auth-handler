@@ -21,7 +21,10 @@ export async function GET(request: Request) {
     .from("upstox_tokens")
     .select("access_token, expires_at")
     .eq("upstox_user_id", upstoxUserId)
-    .single();
+    .order("created_at", { ascending: false })
+.limit(1)
+.maybeSingle();
+
 
   if (error || !data) {
     console.error("❌ Token fetch failed:", error);
