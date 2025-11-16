@@ -26,25 +26,16 @@ export async function POST(req: Request) {
         "Referer": "https://chartink.com/screener/",
       },
       body: formData.toString(),
-      credentials: "include",
     });
 
     const text = await response.text();
 
-    // Try parsing JSON safely
-    let json: any;
+    let json;
     try {
       json = JSON.parse(text);
     } catch (e) {
       return NextResponse.json(
         { error: "Chartink returned non-JSON response", raw: text },
-        { status: 500 }
-      );
-    }
-
-    if (!json?.data) {
-      return NextResponse.json(
-        { error: "Invalid response from Chartink", raw: json },
         { status: 500 }
       );
     }
