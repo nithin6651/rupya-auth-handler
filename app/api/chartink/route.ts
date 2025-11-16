@@ -14,12 +14,15 @@ export async function POST(req: Request) {
       );
     }
 
-    const form = new URLSearchParams();
-    Object.entries(payload).forEach(([k, v]) =>
-      form.append(k, String(v ?? ""))
-    );
+    // 🔍 Debug log
+    console.log("Chartink → Received Payload:", payload);
 
-    const res = await fetch("https://chartink.com/screener/process", {
+    const form = new URLSearchParams();
+    Object.entries(payload).forEach(([k, v]) => {
+      form.append(k, String(v ?? ""));
+    });
+
+    const response = await fetch("https://chartink.com/screener/process", {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
@@ -27,30 +30,40 @@ export async function POST(req: Request) {
           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
         Accept: "application/json, text/javascript, */*; q=0.01",
         "X-Requested-With": "XMLHttpRequest",
-        Referer:
-          "https://chartink.com/screener/breakout-with-volume-checking-stage",
+        Referer: "https://chartink.com/screener/breakout-with-volume-checking-stage",
         Origin: "https://chartink.com",
         Cookie: COOKIE,
       },
       body: form.toString(),
     });
 
-    const text = await res.text();
+    const raw = await response.text();
+
+    // 🔍 Debug log
+    console.log("Chartink → Raw Response:", raw.slice(0, 300));
 
     try {
-      const json = JSON.parse(text);
+      const json = JSON.parse(raw);
+
       return NextResponse.json({
         ok: true,
         total: json.total ?? 0,
         results: json.data ?? [],
       });
-    } catch {
+    } catch (e) {
       return NextResponse.json(
-        { ok: false, error: "HTML returned", raw: text.slice(0, 3000) },
+        {
+          ok: false,
+          error: "HTML returned instead of JSON",
+          raw: raw.slice(0, 3000),
+        },
         { status: 502 }
       );
     }
   } catch (err: any) {
-    return NextResponse.json({ ok: false, error: err.toString() }, { status: 500 });
+    return NextResponse.json(
+      { ok: false, error: err.toString() },
+      { status: 500 }
+    );
   }
 }
