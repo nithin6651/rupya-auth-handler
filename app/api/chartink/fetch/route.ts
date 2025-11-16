@@ -1,21 +1,27 @@
 import { NextResponse } from "next/server";
 
+const CI_SESSION = "eyJpdiI6IlZ2Qzh6RXJRTDVkOUV5RERIWXNvWUE9PSIsInZhbHVlIjoiVXFLWTJrS3hRMWNMSjdVUnI3OHJGSHdYMjZqL0NvYkJLcnFTSXFuQ2hPU2dETlV0ZUozRXN4TDBTM0JzZEJ4NEFpUk1PdFZ6cys5OE9KSU0wUUlsTkVtK0NWNzVTeFNHTDlsK1p2MG0zNXlpZmJYek1tN0NKVXR3N05ja2htWnIiLCJtYWMiOiI5OGM5ODI0YzE0ZThmNzUzZTAwZTM2MTRjOGZjNGUyOGQzYTdlMGVlNTdmMDFjN2VlM2FkZjM0NmUxNDkxMGMyIiwidGFnIjoiIn0%3D";
+
+const XSRF_TOKEN = "eyJpdiI6Inptc25oR0Y5ZlpFWkhLbDhjQUZZU1E9PSIsInZhbHVlIjoicHlNQncxOTN5VldPM1Q4TENOSk9ZaHR2SS9RZndWSHF0eVFkTGFvRGFyRnBnZnVYZFIyRFBWNXE2Q0JhT0ZoaVc4bVVqRDdkZVAwZ1RLYU5vOFZLbVAwMDkwSmJiNnJ4MlJuME9ua2F2RFRBQy9ubDFzM1BCYXBKVGdSbXpiMU0iLCJtYWMiOiJlZTQwODBmYTVmYWQxZGZlNjA2MDczZDZkZThlNjg0MTJmOTYwMzQ3MzczNjEyMzI0NDhkZTI2YzMyMDg5ZThmIiwidGFnIjoiIn0%3D";
+
 export async function POST(req: Request) {
   try {
     const payload = await req.json();
 
     if (!payload.scan_clause) {
       return NextResponse.json(
-        { ok: false, error: "scan_clause is missing" },
+        { ok: false, error: "scan_clause missing" },
         { status: 400 }
       );
     }
 
-    // Build form data for Chartink
+    // RAW (NOT URL-ENCODED)
+    const scanClause = payload.scan_clause;
+    const maxRows = payload.max_rows ?? "65";
+
     const form = new URLSearchParams();
-    Object.entries(payload).forEach(([k, v]) => {
-      form.append(k, String(v ?? ""));
-    });
+    form.append("scan_clause", scanClause);
+    form.append("max_rows", maxRows);
 
     const res = await fetch("https://chartink.com/screener/process", {
       method: "POST",
@@ -27,17 +33,13 @@ export async function POST(req: Request) {
         "X-Requested-With": "XMLHttpRequest",
         Referer: "https://chartink.com/screener/",
         Origin: "https://chartink.com",
-
-        /** 🔥 REQUIRED COOKIE HERE 🔥 */
-        "Cookie":
-          "ci_session=eyJpdiI6IlZ2Qzh6RXJRTDVkOUV5RERIWXNvWUE9PSIsInZhbHVlIjoiVXFLWTJrS3hRMWNMSjdVUnI3OHJGSHdYMjZqL0NvYkJLcnFTSXFuQ2hPU2dETlV0ZUozRXN4TDBTM0JzZEJ4NEFpUk1PdFZ6cys5OE9KSU0wUUlsTkVtK0NWNzVTeFNHTDlsK1p2MG0zNXlpZmJYek1tN0NKVXR3N05ja2htWnIiLCJtYWMiOiI5OGM5ODI0YzE0ZThmNzUzZTAwZTM2MTRjOGZjNGUyOGQzYTdlMGVlNTdmMDFjN2VlM2FkZjM0NmUxNDkxMGMyIiwidGFnIjoiIn0=;",
+        Cookie: `ci_session=${CI_SESSION}; XSRF-TOKEN=${XSRF_TOKEN}`,
       },
       body: form.toString(),
     });
 
     const text = await res.text();
 
-    // Try JSON parse
     try {
       const json = JSON.parse(text);
       return NextResponse.json({
@@ -47,9 +49,8 @@ export async function POST(req: Request) {
         results: json.data ?? [],
       });
     } catch {
-      // HTML returned (blocked)
       return NextResponse.json(
-        { ok: false, error: "HTML returned instead of JSON", raw: text.slice(0, 5000) },
+        { ok: false, error: "HTML returned", raw: text.slice(0, 5000) },
         { status: 502 }
       );
     }
