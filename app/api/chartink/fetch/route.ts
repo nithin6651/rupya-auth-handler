@@ -1,28 +1,21 @@
-// app/api/chartink/fetch/route.ts
 import { NextResponse } from "next/server";
-
-// UNIVERSAL FORWARDING API
-// Forwards ANY fields to Chartink exactly as sent.
 
 export async function POST(req: Request) {
   try {
-    // Parse full JSON body
     const payload = await req.json();
 
-    if (!payload || typeof payload !== "object") {
+    if (!payload.scan_clause) {
       return NextResponse.json(
-        { ok: false, error: "Invalid request body" },
+        { ok: false, error: "scan_clause is missing" },
         { status: 400 }
       );
     }
 
-    // Convert JSON → URL encoded form data EXACTLY like browser
     const form = new URLSearchParams();
-    Object.entries(payload).forEach(([key, value]) => {
-      form.append(key, String(value ?? ""));
+    Object.entries(payload).forEach(([k, v]) =>{
+      form.append(k, String(v ?? ""));
     });
 
-    // Forward to Chartink screener/process
     const res = await fetch("https://chartink.com/screener/process", {
       method: "POST",
       headers: {
@@ -39,31 +32,21 @@ export async function POST(req: Request) {
 
     const text = await res.text();
 
-    // Try JSON
     try {
       const json = JSON.parse(text);
-
       return NextResponse.json({
         ok: true,
-        total: json.total ?? null,
-        columns: json.columns ?? null,
+        total: json.total ?? 0,
+        columns: json.columns ?? [],
         results: json.data ?? [],
       });
-    } catch (e) {
-      // Chartink returned HTML → forward raw so Flutter can read it
+    } catch {
       return NextResponse.json(
-        {
-          ok: false,
-          error: "Chartink returned HTML instead of JSON",
-          raw: text.slice(0, 5000),
-        },
+        { ok: false, error: "HTML returned", raw: text.slice(0, 5000) },
         { status: 502 }
       );
     }
   } catch (err: any) {
-    return NextResponse.json(
-      { ok: false, error: err.toString() },
-      { status: 500 }
-    );
+    return NextResponse.json({ ok: false, error: err.toString() }, { status: 500 });
   }
 }
