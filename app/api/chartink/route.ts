@@ -11,9 +11,10 @@ export async function POST(req: Request) {
     const payload = await req.json();
     console.log("Chartink → Received Payload:", payload);
 
-    const screenerURL = "https://chartink.com/screener";
+    // THIS IS THE FIX
+    const screenerURL = "https://chartink.com/login";
 
-    // STEP 1 — fetch public screener page
+    // STEP 1 — fetch login page (always returns all cookies)
     const page = await fetch(screenerURL, {
       method: "GET",
       headers: BROWSER_HEADERS,
@@ -45,19 +46,16 @@ export async function POST(req: Request) {
       );
     }
 
-    // STEP 2 — Build cookies
     const fullCookie = [
       `XSRF-TOKEN=${encodeURIComponent(xsrf)}`,
       `laravel_session=${encodeURIComponent(laravel)}`,
     ].join("; ");
 
-    // STEP 3 — create form
     const form = new URLSearchParams();
     Object.entries(payload).forEach(([k, v]) =>
       form.append(k, String(v ?? ""))
     );
 
-    // STEP 4 — submit POST to screener/process
     const res = await fetch("https://chartink.com/screener/process", {
       method: "POST",
       headers: {
