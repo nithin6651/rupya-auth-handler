@@ -1,34 +1,30 @@
-// app/api/screener/chartink/webhook/route.ts
 import { NextResponse } from "next/server";
 import { parse } from "csv-parse/sync";
 import { createClient } from "@supabase/supabase-js";
 
+const supabase = createClient(
+  process.env.SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!
+);
+
 export async function POST(req: Request) {
   try {
-    const text = await req.text(); // CSV comes as raw string
+    const text = await req.text();
 
     if (!text.trim().includes(",")) {
       return NextResponse.json(
-        { ok: false, error: "CSV not detected in payload" },
+        { ok: false, error: "CSV not detected" },
         { status: 400 }
       );
     }
 
-    // Parse CSV
     const records = parse(text, {
       columns: true,
       skip_empty_lines: true,
     });
 
-    // ⭐ MOVE Supabase init inside the handler (fixes build error)
-    const supabase = createClient(
-      process.env.SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!
-    );
-
-    // Insert into Supabase
     const { error } = await supabase.from("chartink_results").insert({
-      screener: "breakout_volume",
+      screener: "breakout-volume",
       data: records,
     });
 
@@ -36,7 +32,7 @@ export async function POST(req: Request) {
 
     return NextResponse.json({
       ok: true,
-      received_rows: records.length,
+      rows: records.length,
     });
   } catch (err: any) {
     return NextResponse.json(
