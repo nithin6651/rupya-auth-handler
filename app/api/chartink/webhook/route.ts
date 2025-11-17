@@ -1,26 +1,46 @@
-// app/api/screener/chartink/webhook/route.ts
 import { NextResponse } from "next/server";
+import { parse } from "csv-parse/sync";
+import { createClient } from "@supabase/supabase-js";
 
-/*
-  Chartink will POST JSON to the webhook URL you enter in their alert dialog.
-  This endpoint simply validates and returns 200 quickly, and then you can
-  process/store the payload (e.g. push to Supabase, Redis, or send to users).
-*/
+const supabase = createClient(
+  process.env.SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY! // service role required for inserts
+);
 
 export async function POST(req: Request) {
   try {
-    const payload = await req.json();
+    const text = await req.text(); // CSV comes as raw text
+  
+    if (!text.trim().includes(",")) {
+      return NextResponse.json(
+        { ok: false, error: "CSV not detected in payload" },
+        { status: 400 }
+      );
+    }
 
-    // QUICK VALIDATION (chartink payload structure may include: name, symbol, url, time etc)
-    // Save to DB / enqueue job for processing / send push notification
-    // Example: await saveToSupabase('chartink_alerts', payload);
+    // Parse CSV
+    const records = parse(text, {
+      columns: true,
+      skip_empty_lines: true,
+    });
 
-    console.log("Chartink webhook received:", payload);
+    // Save to Supabase
+    const { error } = await supabase.from("chartink_results").insert({
+      screener: "breakout_volume", // YOU CAN CHANGE THIS
+      data: records,
+    });
 
-    // respond 200 to acknowledge
-    return NextResponse.json({ ok: true });
+    if (error) throw error;
+
+    return NextResponse.json({
+      ok: true,
+      received_rows: records.length,
+    });
+
   } catch (err: any) {
-    console.error("Webhook parse error:", err);
-    return NextResponse.json({ error: "invalid webhook payload" }, { status: 400 });
+    return NextResponse.json(
+      { ok: false, error: err.message },
+      { status: 500 }
+    );
   }
 }
