@@ -1,91 +1,130 @@
 import { NextResponse } from "next/server";
 
 const COOKIE =
-  "ci_session=PASTE_YOUR_COOKIE_HERE"; // <-- IMPORTANT: replace this ONLY
+  "ci_session=eyJpdiI6IlZ2Qzh6RXJRTDVkOUV5RERIWXNvWUE9PSIsInZhbHVlIjoiVXFLWTJrS3hRMWNMSjdVUnI3OHJGSHdYMjZqL0NvYkJLcnFTSXFuQ2hPU2dETlV0ZUozRXN4TDBTM0JzZEJ4NEFpUk1PdFZ6cys5OE9KSU0wUUlsTkVtK0NWNzVTeFNHTDlsK1p2MG0zNXlpZmJYek1tN0NKVXR3N05ja2htWnIiLCJtYWMiOiI5OGM5ODI0YzE0ZThmNzUzZTAwZTM2MTRjOGZjNGUyOGQzYTdlMGVlNTdmMDFjN2VlM2FkZjM0NmUxNDkxMGMyIiwidGFnIjoiIn0"; // <-- replace only this
 
 const SCREENER_URL =
   "https://chartink.com/screener/breakout-with-volume-checking-stage";
-
 const PROCESS_URL = "https://chartink.com/screener/process";
+
+function safeSlice(s: string | null, n = 300) {
+  if (!s) return "";
+  return s.length > n ? s.slice(0, n) + "..." : s;
+}
 
 export async function POST(req: Request) {
   try {
-    // 1️⃣ Receive payload from Flutter
-    const payload = await req.json();
+    const payload = await req.json().catch((e) => {
+      throw new Error("Invalid JSON payload: " + e);
+    });
 
-    if (!payload.scan_clause) {
-      return NextResponse.json(
-        { ok: false, error: "scan_clause missing" },
-        { status: 400 }
-      );
+    if (!payload || !payload.scan_clause) {
+      return NextResponse.json({ ok: false, error: "scan_clause missing" }, { status: 400 });
     }
 
-    // 2️⃣ Fetch screener page → extract CSRF
-    const htmlRes = await fetch(SCREENER_URL, {
+    console.log("Chartink → Received payload keys:", Object.keys(payload));
+
+    // 1) Fetch the screener page to extract CSRF token
+    const pageResp = await fetch(SCREENER_URL, {
       method: "GET",
-      headers: { Cookie: COOKIE },
+      headers: { Cookie: COOKIE, "User-Agent": "Mozilla/5.0" },
       cache: "no-store",
     });
 
-    const html = await htmlRes.text();
+    const pageStatus = pageResp.status;
+    const pageText = await pageResp.text();
 
-    const csrfMatch = html.match(
-      /<meta name="csrf-token" content="([^"]+)" \/>/
-    );
+    console.log("Chartink → screener page status:", pageStatus);
+    console.log("Chartink → screener page snippet:", safeSlice(pageText, 800));
 
-    if (!csrfMatch) {
+    if (pageStatus !== 200) {
       return NextResponse.json(
-        { ok: false, error: "Failed to extract CSRF token" },
-        { status: 500 }
+        {
+          ok: false,
+          error: `Failed to GET screener page (status ${pageStatus})`,
+          pageStatus,
+          pageSnippet: safeSlice(pageText, 2000),
+        },
+        { status: 502 }
       );
     }
 
-    const CSRF = csrfMatch[1]; // <-- FIXED
+    // Extract CSRF token
+    const csrfMatch = pageText.match(/<meta name="csrf-token" content="([^"]+)" \/>/);
+    if (!csrfMatch) {
+      // Provide helpful debug: maybe HTML says login/blocked/robot
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "CSRF token not found on screener page",
+          pageSnippet: safeSlice(pageText, 2000),
+        },
+        { status: 500 }
+      );
+    }
+    const CSRF = csrfMatch[1];
+    console.log("Chartink → extracted CSRF length:", CSRF.length);
 
-    // 3️⃣ Build form body (Laravel expects "_token")
+    // 2) Build form body including _token
     const form = new URLSearchParams();
     form.append("_token", CSRF);
+    Object.entries(payload).forEach(([k, v]) => form.append(k, String(v ?? "")));
 
-    Object.entries(payload).forEach(([key, value]) => {
-      form.append(key, String(value ?? ""));
-    });
-
-    // 4️⃣ POST to Chartink -> screener/process
-    const res = await fetch(PROCESS_URL, {
+    // 3) POST to process endpoint
+    const procResp = await fetch(PROCESS_URL, {
       method: "POST",
       headers: {
-        "Content-Type":
-          "application/x-www-form-urlencoded; charset=UTF-8",
+        "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
         Cookie: COOKIE,
         "X-CSRF-TOKEN": CSRF,
         "X-Requested-With": "XMLHttpRequest",
         Referer: SCREENER_URL,
         Origin: "https://chartink.com",
+        "User-Agent": "Mozilla/5.0",
       },
       body: form.toString(),
     });
 
-    const text = await res.text();
+    const procStatus = procResp.status;
+    const procText = await procResp.text();
 
-    // 5️⃣ Try parse JSON
+    console.log("Chartink → process status:", procStatus);
+    console.log("Chartink → process snippet:", safeSlice(procText, 800));
+
+    // If Chartink returns non-200, return debug info
+    if (procStatus !== 200) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "Chartink process returned non-200",
+          procStatus,
+          procSnippet: safeSlice(procText, 4000),
+        },
+        { status: 502 }
+      );
+    }
+
+    // Try parse JSON
     try {
-      const json = JSON.parse(text);
-
+      const json = JSON.parse(procText);
       return NextResponse.json({
         ok: true,
         total: json.total ?? 0,
         results: json.data ?? [],
       });
-    } catch {
+    } catch (e) {
+      // If not JSON, return HTML snippet for debugging
       return NextResponse.json(
-        { ok: false, error: "HTML returned", raw: text.slice(0, 3000) },
+        {
+          ok: false,
+          error: "Chartink returned non-json text (possibly blocked or login page)",
+          procSnippet: safeSlice(procText, 4000),
+        },
         { status: 502 }
       );
     }
   } catch (err: any) {
-    return NextResponse.json(
-      { ok: false, error: err.toString() },
-      { status: 500 }
-    );
+    console.error("Chartink → internal error:", err);
+    return NextResponse.json({ ok: false, error: String(err) }, { status: 500 });
   }
 }
