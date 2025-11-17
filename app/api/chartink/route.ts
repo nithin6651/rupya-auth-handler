@@ -9,8 +9,9 @@ export async function POST(req: Request) {
 
     console.log("Chartink → Received Payload:", payload);
 
-    const screenerURL =
-      "https://chartink.com/screener/breakout-with-volume-checking-stage";
+    // const screenerURL =
+    //   "https://chartink.com/screener/breakout-with-volume-checking-stage";
+const screenerURL = "https://chartink.com/alerts";
 
     // STEP 1: Fetch page WITHOUT ORIGIN header
     const page = await fetch(screenerURL, {
