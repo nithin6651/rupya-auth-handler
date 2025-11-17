@@ -1,10 +1,16 @@
 import { NextResponse } from "next/server";
 
 const COOKIE =
-  "ci_session=eyJpdiI6Inptc25oR0Y5ZlpFWkhLbDhjQUZZU1E9PSIsInZhbHVlIjoicHlNQncxOTN5VldPM1Q4TENOSk9ZaHR2SS9RZndWSHF0eVFkTGFvRGFyRnBnZnVYZFIyRFBWNXE2Q0JhT0ZoaVc4bVVqRDdkZVAwZ1RLYU5vOFZLbVAwMDkwSmJiNnJ4MlJuME9ua2F2RFRBQy9ubDFzM1BCYXBKVGdSbXpiMU0iLCJtYWMiOiJlZTQwODBmYTVmYWQxZGZlNjA2MDczZDZkZThlNjg0MTJmOTYwMzQ3MzczNjEyMzI0NDhkZTI2YzMyMDg5ZThmIiwidGFnIjoiIn0%3D";
+  "ci_session=PASTE_YOUR_COOKIE_HERE"; // <-- IMPORTANT: replace this ONLY
+
+const SCREENER_URL =
+  "https://chartink.com/screener/breakout-with-volume-checking-stage";
+
+const PROCESS_URL = "https://chartink.com/screener/process";
 
 export async function POST(req: Request) {
   try {
+    // 1️⃣ Receive payload from Flutter
     const payload = await req.json();
 
     if (!payload.scan_clause) {
@@ -14,49 +20,65 @@ export async function POST(req: Request) {
       );
     }
 
-    // 🔍 Debug log
-    console.log("Chartink → Received Payload:", payload);
-
-    const form = new URLSearchParams();
-    Object.entries(payload).forEach(([k, v]) => {
-      form.append(k, String(v ?? ""));
+    // 2️⃣ Fetch screener page → extract CSRF
+    const htmlRes = await fetch(SCREENER_URL, {
+      method: "GET",
+      headers: { Cookie: COOKIE },
+      cache: "no-store",
     });
 
-    const response = await fetch("https://chartink.com/screener/process", {
+    const html = await htmlRes.text();
+
+    const csrfMatch = html.match(
+      /<meta name="csrf-token" content="([^"]+)" \/>/
+    );
+
+    if (!csrfMatch) {
+      return NextResponse.json(
+        { ok: false, error: "Failed to extract CSRF token" },
+        { status: 500 }
+      );
+    }
+
+    const CSRF = csrfMatch[1]; // <-- FIXED
+
+    // 3️⃣ Build form body (Laravel expects "_token")
+    const form = new URLSearchParams();
+    form.append("_token", CSRF);
+
+    Object.entries(payload).forEach(([key, value]) => {
+      form.append(key, String(value ?? ""));
+    });
+
+    // 4️⃣ POST to Chartink -> screener/process
+    const res = await fetch(PROCESS_URL, {
       method: "POST",
       headers: {
-        "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        Accept: "application/json, text/javascript, */*; q=0.01",
-        "X-Requested-With": "XMLHttpRequest",
-        Referer: "https://chartink.com/screener/breakout-with-volume-checking-stage",
-        Origin: "https://chartink.com",
+        "Content-Type":
+          "application/x-www-form-urlencoded; charset=UTF-8",
         Cookie: COOKIE,
+        "X-CSRF-TOKEN": CSRF,
+        "X-Requested-With": "XMLHttpRequest",
+        Referer: SCREENER_URL,
+        Origin: "https://chartink.com",
       },
       body: form.toString(),
     });
 
-    const raw = await response.text();
+    const text = await res.text();
 
-    // 🔍 Debug log
-    console.log("Chartink → Raw Response:", raw.slice(0, 300));
-
+    // 5️⃣ Try parse JSON
     try {
-      const json = JSON.parse(raw);
+      const json = JSON.parse(text);
 
       return NextResponse.json({
         ok: true,
         total: json.total ?? 0,
         results: json.data ?? [],
       });
-    } catch (e) {
+    } catch {
       return NextResponse.json(
-        {
-          ok: false,
-          error: "HTML returned instead of JSON",
-          raw: raw.slice(0, 3000),
-        },
+        { ok: false, error: "HTML returned", raw: text.slice(0, 3000) },
         { status: 502 }
       );
     }
