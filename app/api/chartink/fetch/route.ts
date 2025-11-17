@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 const COOKIE =
-  "ci_session=eyJpdiI6Inptc25oR0Y5ZlpFWkhLbDhjQUZZU1E9PSIsInZhbHVlIjoicHlNQncxOTN5VldPM1Q4TENOSk9ZaHR2SS9RZndWSHF0eVFkTGFvRGFyRnBnZnVYZFIyRFBWNXE2Q0JhT0ZoaVc4bVVqRDdkZVAwZ1RLYU5vOFZLbVAwMDkwSmJiNnJ4MlJuME9ua2F2RFRBQy9ubDFzM1BCYXBKVGdSbXpiMU0iLCJtYWMiOiJlZTQwODBmYTVmYWQxZGZlNjA2MDczZDZkZThlNjg0MTJmOTYwMzQ3MzczNjEyMzI0NDhkZTI2YzMyMDg5ZThmIiwidGFnIjoiIn0%3D";
+  "ci_session=eyJpdiI6IlZ2Qzh6RXJRTDVkOUV5RERIWXNvWUE9PSIsInZhbHVlIjoiVXFLWTJrS3hRMWNMSjdVUnI3OHJGSHdYMjZqL0NvYkJLcnFTSXFuQ2hPU2dETlV0ZUozRXN4TDBTM0JzZEJ4NEFpUk1PdFZ6cys5OE9KSU0wUUlsTkVtK0NWNzVTeFNHTDlsK1p2MG0zNXlpZmJYek1tN0NKVXR3N05ja2htWnIiLCJtYWMiOiI5OGM5ODI0YzE0ZThmNzUzZTAwZTM2MTRjOGZjNGUyOGQzYTdlMGVlNTdmMDFjN2VlM2FkZjM0NmUxNDkxMGMyIiwidGFnIjoiIn0%3D";
 
 export async function POST(req: Request) {
   try {
@@ -14,23 +14,50 @@ export async function POST(req: Request) {
       );
     }
 
-    const form = new URLSearchParams();
-    Object.entries(payload).forEach(([k, v]) =>
-      form.append(k, String(v ?? ""))
+    // 1️⃣ Fetch screener page to get CSRF token
+    const page = await fetch(
+      "https://chartink.com/screener/breakout-with-volume-checking-stage",
+      {
+        headers: { Cookie: COOKIE },
+      }
     );
 
+    const html = await page.text();
+
+    // Extract CSRF token
+    const match = html.match(
+      /<meta name="csrf-token" content="([^"]+)" \/>/
+    );
+
+    if (!match) {
+      return NextResponse.json(
+        { ok: false, error: "CSRF token not found" },
+        { status: 500 }
+      );
+    }
+
+    const csrf = match[1];
+
+    // 2️⃣ Build form data with _token + scan_clause
+    const form = new URLSearchParams();
+    form.append("_token", csrf);
+
+    Object.entries(payload).forEach(([k, v]) => {
+      form.append(k, String(v ?? ""));
+    });
+
+    // 3️⃣ Send POST request to process API
     const res = await fetch("https://chartink.com/screener/process", {
       method: "POST",
       headers: {
-        "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        Accept: "application/json, text/javascript, */*; q=0.01",
+        "Content-Type":
+          "application/x-www-form-urlencoded; charset=UTF-8",
+        Cookie: COOKIE,
+        "X-CSRF-TOKEN": csrf,
         "X-Requested-With": "XMLHttpRequest",
         Referer:
           "https://chartink.com/screener/breakout-with-volume-checking-stage",
         Origin: "https://chartink.com",
-        Cookie: COOKIE,
       },
       body: form.toString(),
     });
@@ -39,6 +66,7 @@ export async function POST(req: Request) {
 
     try {
       const json = JSON.parse(text);
+
       return NextResponse.json({
         ok: true,
         total: json.total ?? 0,
@@ -46,11 +74,14 @@ export async function POST(req: Request) {
       });
     } catch {
       return NextResponse.json(
-        { ok: false, error: "HTML returned", raw: text.slice(0, 3000) },
+        { ok: false, error: "HTML returned", raw: text },
         { status: 502 }
       );
     }
-  } catch (err: any) {
-    return NextResponse.json({ ok: false, error: err.toString() }, { status: 500 });
+  } catch (e: any) {
+    return NextResponse.json(
+      { ok: false, error: e.toString() },
+      { status: 500 }
+    );
   }
 }
