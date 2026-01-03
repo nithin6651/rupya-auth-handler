@@ -3,8 +3,17 @@ import { authenticator } from "otplib";
 
 export const dynamic = "force-dynamic";
 
-// Helper to login and get JWT (Cached in memory ideally, or just re-login for simplicity/robustness first)
+// Global Cache
+let cachedToken: string | null = null;
+let tokenExpiry: number = 0;
+
+// Helper to login and get JWT (Cached in memory)
 async function getAngelSession() {
+    // Return cached token if valid (buffer 5 mins)
+    if (cachedToken && Date.now() < tokenExpiry - 300000) {
+        return cachedToken;
+    }
+
     const apiKey = process.env.ANGEL_MARKET_API_KEY;
     const clientCode = process.env.ANGEL_CLIENT_CODE;
     const password = process.env.ANGEL_PASSWORD;
@@ -41,8 +50,12 @@ async function getAngelSession() {
     try {
         const data = JSON.parse(responseText);
         if (data.status === true && data.data && data.data.jwtToken) {
-            return data.data.jwtToken;
+            cachedToken = data.data.jwtToken;
+            // Token valid for 24 hours usually, set expiry to 20 hours to be safe
+            tokenExpiry = Date.now() + (20 * 60 * 60 * 1000);
+            return cachedToken;
         } else {
+            console.error("Angel Login Failed Response:", data);
             throw new Error(`Angel Login Failed: ${data.message || 'Unknown Error'} (Code: ${data.errorcode})`);
         }
     } catch (e) {
