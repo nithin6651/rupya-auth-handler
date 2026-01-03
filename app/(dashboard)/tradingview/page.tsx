@@ -1,5 +1,5 @@
-import TradingViewWrapper from "./TradingViewWrapper";
+import TradingViewDashboard from "./TradingViewDashboard";
 
 export default function Page() {
-  return <TradingViewWrapper />;
+  return <TradingViewDashboard />;
 }
