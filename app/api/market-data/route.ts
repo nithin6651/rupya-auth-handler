@@ -128,6 +128,8 @@ export async function GET() {
         // If we are strictly blocked, return plausible dummy data so the UI doesn't crash/spin.
         return NextResponse.json({
             success: true,
+            source: "MOCK_FAILOVER", // Flag to indicate this is fake data
+            debug_error: error.message || "Unknown Error", // Reason for failover
             data: {
                 exchange: "NSE",
                 tradingsymbol: "NIFTY",
