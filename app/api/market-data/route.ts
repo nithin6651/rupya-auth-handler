@@ -74,46 +74,85 @@ export async function GET() {
         // Using LTP Data endpoint (lighter than Quote)
         // NOTE: If this fails (Rate Limit), we return MOCK DATA to keep the app working.
         try {
-            // Correct Endpoint: /order/v1/getLtpData (Not market/v1)
+            // Define Symbols to Fetch
+            const symbols = [
+                { name: "NIFTY", symboltoken: "99926000" },
+                { name: "BANKNIFTY", symboltoken: "99926009" }
+            ];
+
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), 4000);
 
-            let marketResp;
+            let results = {};
+
             try {
-                marketResp = await fetch("https://apiconnect.angelbroking.com/rest/secure/angelbroking/order/v1/getLtpData", {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json",
-                        "Accept": "application/json",
-                        "Authorization": "Bearer " + token,
-                        "X-User-Type": "USER",
-                        "X-SourceID": "WEB",
-                        "X-ClientLocalIP": "127.0.0.1",
-                        "X-ClientPublicIP": "127.0.0.1",
-                        "X-MACAddress": "MAC_ADDRESS",
-                        "X-PrivateKey": process.env.ANGEL_MARKET_API_KEY!,
-                    },
-                    body: JSON.stringify({
-                        exchange: "NSE",
-                        tradingsymbol: "NIFTY",
-                        symboltoken: "99926000"
-                    }),
-                    signal: controller.signal
+                const promises = symbols.map(async (sym) => {
+                    const resp = await fetch("https://apiconnect.angelbroking.com/rest/secure/angelbroking/order/v1/getLtpData", {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json",
+                            "Accept": "application/json",
+                            "Authorization": "Bearer " + token,
+                            "X-User-Type": "USER",
+                            "X-SourceID": "WEB",
+                            "X-ClientLocalIP": "127.0.0.1",
+                            "X-ClientPublicIP": "127.0.0.1",
+                            "X-MACAddress": "MAC_ADDRESS",
+                            "X-PrivateKey": process.env.ANGEL_MARKET_API_KEY!,
+                        },
+                        body: JSON.stringify({
+                            exchange: "NSE",
+                            tradingsymbol: sym.name,
+                            symboltoken: sym.symboltoken
+                        }),
+                        signal: controller.signal
+                    });
+
+                    if (!resp.ok) throw new Error(`Failed to fetch ${sym.name}`);
+                    const json = await resp.json();
+
+                    if (json.status === true && json.data) {
+                        // Calculate Change
+                        const ltp = parseFloat(json.data.ltp);
+                        const close = parseFloat(json.data.close); // Previous Close
+                        const change = ltp - close;
+                        const pChange = (change / close) * 100;
+
+                        return {
+                            name: sym.name,
+                            data: {
+                                ...json.data,
+                                change: change.toFixed(2),
+                                pChange: pChange.toFixed(2)
+                            }
+                        };
+                    }
+                    return { name: sym.name, data: null };
                 });
+
+                const outcomes = await Promise.all(promises);
+
+                // Reduce to Map
+                outcomes.forEach(o => {
+                    if (o && o.data) {
+                        // @ts-ignore
+                        results[o.name] = o.data;
+                    }
+                });
+
             } finally {
                 clearTimeout(timeoutId);
             }
 
-            const marketData = await marketResp.json();
-
-            // Validate response
-            if (marketData.status === true) {
+            // Validate if we got at least NIFTY
+            // @ts-ignore
+            if (results["NIFTY"]) {
                 return NextResponse.json({
                     success: true,
-                    data: marketData.data
+                    data: results
                 });
             } else {
-                throw new Error(marketData.message || "Angel API Error");
+                throw new Error("Failed to fetch NIFTY data");
             }
 
         } catch (apiError) {
@@ -125,16 +164,33 @@ export async function GET() {
         console.error("Market Data / Login Error:", error);
 
         // FAILOVER TO MOCK DATA check
-        // If we are strictly blocked, return plausible dummy data so the UI doesn't crash/spin.
+        // Return plausible dummy data for BOTH indices
+        const mockNifty = 24500.55 + (Math.random() * 50 - 25);
+        const mockBank = 52400.20 + (Math.random() * 100 - 50);
+
         return NextResponse.json({
             success: true,
-            source: "MOCK_FAILOVER", // Flag to indicate this is fake data
-            debug_error: error.message || "Unknown Error", // Reason for failover
+            source: "MOCK_FAILOVER", // Flag
+            debug_error: error.message || "Unknown Error",
             data: {
-                exchange: "NSE",
-                tradingsymbol: "NIFTY",
-                symboltoken: "99926000",
-                ltp: 24500.55 + (Math.random() * 10 - 5) // Mock live fluctuation
+                "NIFTY": {
+                    exchange: "NSE",
+                    tradingsymbol: "NIFTY",
+                    symboltoken: "99926000",
+                    ltp: mockNifty.toFixed(2),
+                    close: "24400.00",
+                    change: (mockNifty - 24400).toFixed(2),
+                    pChange: ((mockNifty - 24400) / 24400 * 100).toFixed(2)
+                },
+                "BANKNIFTY": {
+                    exchange: "NSE",
+                    tradingsymbol: "BANKNIFTY",
+                    symboltoken: "99926009",
+                    ltp: mockBank.toFixed(2),
+                    close: "52300.00",
+                    change: (mockBank - 52300).toFixed(2),
+                    pChange: ((mockBank - 52300) / 52300 * 100).toFixed(2)
+                }
             }
         });
     }
