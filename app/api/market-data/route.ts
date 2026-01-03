@@ -75,25 +75,34 @@ export async function GET() {
         // NOTE: If this fails (Rate Limit), we return MOCK DATA to keep the app working.
         try {
             // Correct Endpoint: /order/v1/getLtpData (Not market/v1)
-            const marketResp = await fetch("https://apiconnect.angelbroking.com/rest/secure/angelbroking/order/v1/getLtpData", {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    "Accept": "application/json",
-                    "Authorization": "Bearer " + token,
-                    "X-User-Type": "USER",
-                    "X-SourceID": "WEB",
-                    "X-ClientLocalIP": "127.0.0.1",
-                    "X-ClientPublicIP": "127.0.0.1",
-                    "X-MACAddress": "MAC_ADDRESS",
-                    "X-PrivateKey": process.env.ANGEL_MARKET_API_KEY!,
-                },
-                body: JSON.stringify({
-                    exchange: "NSE",
-                    tradingsymbol: "NIFTY",
-                    symboltoken: "99926000"
-                }),
-            });
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 4000);
+
+            let marketResp;
+            try {
+                marketResp = await fetch("https://apiconnect.angelbroking.com/rest/secure/angelbroking/order/v1/getLtpData", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "Accept": "application/json",
+                        "Authorization": "Bearer " + token,
+                        "X-User-Type": "USER",
+                        "X-SourceID": "WEB",
+                        "X-ClientLocalIP": "127.0.0.1",
+                        "X-ClientPublicIP": "127.0.0.1",
+                        "X-MACAddress": "MAC_ADDRESS",
+                        "X-PrivateKey": process.env.ANGEL_MARKET_API_KEY!,
+                    },
+                    body: JSON.stringify({
+                        exchange: "NSE",
+                        tradingsymbol: "NIFTY",
+                        symboltoken: "99926000"
+                    }),
+                    signal: controller.signal
+                });
+            } finally {
+                clearTimeout(timeoutId);
+            }
 
             const marketData = await marketResp.json();
 
