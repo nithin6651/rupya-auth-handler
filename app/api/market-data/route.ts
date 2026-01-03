@@ -74,7 +74,8 @@ export async function GET() {
         // Using LTP Data endpoint (lighter than Quote)
         // NOTE: If this fails (Rate Limit), we return MOCK DATA to keep the app working.
         try {
-            const marketResp = await fetch("https://apiconnect.angelbroking.com/rest/secure/angelbroking/market/v1/ltpData", {
+            // Correct Endpoint: /order/v1/getLtpData (Not market/v1)
+            const marketResp = await fetch("https://apiconnect.angelbroking.com/rest/secure/angelbroking/order/v1/getLtpData", {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
